@@ -55,7 +55,7 @@ def webhook():
     return "ok"
 
 # Установка webhook при старте (однократно)
-@app.before_first_request
+@app.before_request
 def set_webhook():
     url = f"{WEBHOOK_DOMAIN}/webhook/{BOT_TOKEN}"
     application.bot.set_webhook(url)
