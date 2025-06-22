@@ -35,3 +35,20 @@ dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 
 updater.start_polling()
 updater.idle()
+
+# Заглушка-порт, чтобы Render думал, что это веб-приложение
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+class DummyServer(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running")
+
+def run_dummy_server():
+    server_address = ('', 8080)
+    httpd = HTTPServer(server_address, DummyServer)
+    httpd.serve_forever()
+
+threading.Thread(target=run_dummy_server, daemon=True).start()
