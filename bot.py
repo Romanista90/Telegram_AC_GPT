@@ -44,12 +44,13 @@ application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_m
 
 # Webhook-обработчик
 @flask_app.route(f"/webhook/{TELEGRAM_TOKEN}", methods=["POST"])
-def webhook():
+def telegram_webhook():
     try:
         data = request.get_json(force=True)
         update = Update.de_json(data, application.bot)
+        # запускаем как фоновую задачу
         application.create_task(application.process_update(update))
-    except Exception:
+    except Exception as e:
         logger.exception("Ошибка при обработке запроса от Telegram")
     return "OK"
 
