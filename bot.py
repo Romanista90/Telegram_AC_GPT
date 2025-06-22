@@ -1,71 +1,61 @@
 import os
 import logging
 import openai
+from flask import Flask, request
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-import asyncio
+from telegram.ext import Application, MessageHandler, CommandHandler, ContextTypes, filters
 
-# Логирование
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# OpenAI ключ
-openai.api_key = os.getenv("TELEGRAM_GPT_OPENAI_API_KEY")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_GPT_TELEGRAM_TOKEN")
+OPENAI_API_KEY = os.getenv("TELEGRAM_GPT_OPENAI_API_KEY")
+WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")
 
-# Команда /start
+openai.api_key = OPENAI_API_KEY
+flask_app = Flask(__name__)
+application = Application.builder().token(TELEGRAM_TOKEN).build()
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Привет! Отправь мне описание задачи, и я сгенерирую критерии приёмки."
-    )
+    await update.message.reply_text("Привет! Отправь мне описание задачи, и я сгенерирую критерии приёмки.")
 
-# Обработка сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     description = update.message.text
     try:
         response = openai.ChatCompletion.create(
             model="gpt-4o",
             messages=[
-                {
-                    "role": "system",
-                    "content": "Ты помогаешь писать критерии приёмки на основе описания задачи. Формулируй их в виде маркированного списка. Действуй как опытный аналитик или продакт. Критериев должно быть не меньше трёх, максимум не ограничен, но пиши только полезные критерии, пиши вдумчиво."
-                },
-                {
-                    "role": "user",
-                    "content": description
-                }
+                {"role": "system", "content": "Ты помогаешь писать критерии приёмки на основе описания задачи. Формулируй их в виде маркированного списка. Действуй как опытный аналитик или продакт. Критериев должно быть не меньше трёх, максимум не ограничен, но пиши только полезные критерии, пиши вдумчиво."},
+                {"role": "user", "content": description}
             ]
         )
         result = response.choices[0].message.content.strip()
         await update.message.reply_text(result)
-
     except Exception as e:
-        logging.exception("Ошибка при обращении к OpenAI")
-        await update.message.reply_text(f"Произошла ошибка: {str(e)}")
+        logger.exception("Ошибка при генерации ответа")
+        await update.message.reply_text(f"Произошла ошибка: {e}")
 
-# Основной запуск с Webhook
-async def main():
-    TOKEN = os.getenv("TELEGRAM_GPT_TELEGRAM_TOKEN")
-    if not TOKEN:
-        raise ValueError("Не установлен TELEGRAM_GPT_TELEGRAM_TOKEN")
+application.add_handler(CommandHandler("start", start))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    application = ApplicationBuilder().token(TOKEN).build()
+@flask_app.route(f"/webhook/{TELEGRAM_TOKEN}", methods=["POST"])
+async def telegram_webhook():
+    try:
+        data = request.get_json(force=True)
+        update = Update.de_json(data, application.bot)
+        await application.process_update(update)
+    except Exception as e:
+        logger.exception("Ошибка при обработке запроса от Telegram")
+    return "OK"
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+if __name__ == "__main__":
+    import asyncio
+    from threading import Thread
 
-    # URL вебхука
-    url = os.getenv("RENDER_EXTERNAL_URL") + f"/webhook/{TOKEN}"
+    async def main():
+        await application.initialize()
+        await application.bot.set_webhook(f"{WEBHOOK_URL}/webhook/{TELEGRAM_TOKEN}")
+        await application.start()
+        Thread(target=lambda: flask_app.run(host="0.0.0.0", port=10000)).start()
 
-    await application.bot.set_webhook(url)
-
-    # Запуск сервера на порту 10000
-    await application.run_webhook(
-        listen="0.0.0.0",
-        port=10000,
-        webhook_url=url,
-    )
-
-if __name__ == '__main__':
     asyncio.run(main())
