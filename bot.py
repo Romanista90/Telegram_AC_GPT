@@ -1,59 +1,71 @@
-import os
 import logging
-import openai
+import os
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
-
-# Включаем логирование
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+from telegram.ext import (
+    ApplicationBuilder,
+    ContextTypes,
+    CommandHandler,
 )
+from openai import OpenAI
 
-# Получаем токены из переменных окружения
+# Логирование
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Ключи
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_GPT_TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.environ.get("TELEGRAM_GPT_OPENAI_API_KEY")
+OPENAI_MODEL = "gpt-4o"  # Можно gpt-3.5-turbo, если хочешь дешевле
 
-openai.api_key = OPENAI_API_KEY
+openai = OpenAI(api_key=OPENAI_API_KEY)
 
-# Обработчик входящих сообщений
+# Обработчик команды /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Привет! Отправь мне описание задачи, и я сгенерирую критерии приёмки.")
+
+# Обработка обычного текста
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_message = update.message.text
+    prompt = update.message.text
+    await update.message.reply_text("Генерирую критерии приёмки...")
 
-    prompt = f"""
-Ты — опытный продакт-менеджер. Сформулируй не менее трёх чётких и измеримых критериев приёмки на основе описания задачи ниже. Максимум не ограничен, но пиши полезные критерии, чтобы они помогали в приёмке, а не просто для количества.
+    response = openai.chat.completions.create(
+        model=OPENAI_MODEL,
+        messages=[
+            {"role": "system", "content": "Ты опытный аналитик. На основе описания задачи генерируй критерии приёмки (acceptance criteria) в формате списка."},
+            {"role": "user", "content": prompt}
+        ]
+    )
 
-Описание задачи:
-{user_message}
+    criteria = response.choices[0].message.content
+    await update.message.reply_text(criteria)
 
-Формат ответа:
-- Критерий 1
-- Критерий 2
-...
-    """
+# Запуск приложения с Webhook
+async def main():
+    app = (
+        ApplicationBuilder()
+        .token(TELEGRAM_TOKEN)
+        .read_timeout(10)
+        .write_timeout(10)
+        .get_updates_http_version("1.1")
+        .build()
+    )
 
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.4,
-            max_tokens=500,
-        )
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", start))  # alias
+    app.add_handler(CommandHandler("criteria", handle_message))  # опционально
+    app.add_handler(CommandHandler("acceptance", handle_message))  # опционально
 
-        reply_text = response.choices[0].message.content.strip()
-        await update.message.reply_text(reply_text)
-
-    except Exception as e:
-        logging.error(f"OpenAI API error: {e}")
-        await update.message.reply_text("Произошла ошибка при генерации критериев. Попробуйте позже.")
-
-# Основная функция запуска
-def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    from telegram.ext import MessageHandler, filters
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.run_polling()
 
-if __name__ == '__main__':
-    main()
+    # Webhook
+    webhook_url = os.environ.get("WEBHOOK_URL")  # Добавим на Render
+    await app.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.environ.get("PORT", 10000)),
+        webhook_url=webhook_url
+    )
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
