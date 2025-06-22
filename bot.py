@@ -58,7 +58,7 @@ def webhook():
 @app.before_request
 def set_webhook():
     url = f"{WEBHOOK_DOMAIN}/webhook/{BOT_TOKEN}"
-    application.bot.set_webhook(url)
+    await application.bot.set_webhook(url)
     logging.info(f"Webhook установлен: {url}")
 
 # Запуск Flask-сервера
