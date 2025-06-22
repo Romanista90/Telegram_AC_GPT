@@ -1,14 +1,10 @@
-FROM python
+FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY requirements.txt /app/
+COPY requirements.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN pip install -r requirements.txt
+COPY . .
 
-COPY *.py /app/
-
-ENV TELEGRAM_GPT_DATA_DIR=/data
-RUN mkdir -p /data
-
-ENTRYPOINT ["python", "telegram-gpt.py"]
+CMD ["python", "bot.py"]
