@@ -1,10 +1,11 @@
-FROM python:3.11-slim
+FROM python:3.10
 
 WORKDIR /app
-
-COPY requirements.txt requirements.txt
+COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
+COPY . /app
 
-COPY . .
+ENV TELEGRAM_GPT_DATA_DIR=/data
+RUN mkdir -p /data
 
 CMD ["python", "bot.py"]
