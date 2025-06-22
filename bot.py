@@ -1,54 +1,56 @@
 import os
+import logging
 import openai
 from telegram import Update
-from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
+from telegram.ext import (
+    ApplicationBuilder,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
-# Получаем токены из переменных окружения
-OPENAI_API_KEY = os.environ["TELEGRAM_GPT_OPENAI_API_KEY"]
-TELEGRAM_TOKEN = os.environ["TELEGRAM_GPT_TELEGRAM_TOKEN"]
+# Логирование
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+
+# Токены
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_GPT_TELEGRAM_TOKEN")
+OPENAI_API_KEY = os.getenv("TELEGRAM_GPT_OPENAI_API_KEY")
 
 openai.api_key = OPENAI_API_KEY
 
-# Основной обработчик сообщений
-def handle_message(update: Update, context: CallbackContext):
-    user_input = update.message.text
-    prompt = f"""На основе описания задачи предложи не меньше трёх критериев приёмки. Используй формат чеклиста или Given-When-Then. 
 
-Описание задачи: {user_input}
-"""
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_input = update.message.text
+
+    # Генерация ответа через OpenAI
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=500,
+            model="gpt-3.5-turbo",  # или другой доступный тебе
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Ты помощник, который помогает формулировать критерии приёмки по описанию задачи."
+                },
+                {
+                    "role": "user",
+                    "content": user_input
+                }
+            ]
         )
-        result = response.choices[0].message.content.strip()
-        update.message.reply_text(result)
+        reply_text = response["choices"][0]["message"]["content"]
     except Exception as e:
-        update.message.reply_text(f"Ошибка: {e}")
+        logging.error(f"OpenAI error: {e}")
+        reply_text = "Произошла ошибка при обращении к OpenAI."
 
-# Запуск бота
-updater = Updater(token=TELEGRAM_TOKEN)
-dp = updater.dispatcher
-dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    await update.message.reply_text(reply_text)
 
-updater.start_polling()
-updater.idle()
 
-# Заглушка-порт, чтобы Render думал, что это веб-приложение
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+if __name__ == "__main__":
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-class DummyServer(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot is running")
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-def run_dummy_server():
-    server_address = ('', 8080)
-    httpd = HTTPServer(server_address, DummyServer)
-    httpd.serve_forever()
-
-threading.Thread(target=run_dummy_server, daemon=True).start()
+    print("Бот запущен...")
+    app.run_polling()
