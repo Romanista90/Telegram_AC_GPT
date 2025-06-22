@@ -4,6 +4,8 @@ import openai
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, ContextTypes, filters
+import asyncio
+from threading import Thread
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,6 +17,8 @@ WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")
 openai.api_key = OPENAI_API_KEY
 flask_app = Flask(__name__)
 application = Application.builder().token(TELEGRAM_TOKEN).build()
+
+# --- Хендлеры ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Отправь мне описание задачи, и я сгенерирую критерии приёмки.")
@@ -38,24 +42,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+# --- Webhook Flask Endpoint (синхронный) ---
+
 @flask_app.route(f"/webhook/{TELEGRAM_TOKEN}", methods=["POST"])
-async def telegram_webhook():
+def webhook():
     try:
         data = request.get_json(force=True)
         update = Update.de_json(data, application.bot)
-        await application.process_update(update)
+        asyncio.create_task(application.process_update(update))
     except Exception as e:
         logger.exception("Ошибка при обработке запроса от Telegram")
     return "OK"
 
-if __name__ == "__main__":
-    import asyncio
-    from threading import Thread
+# --- Запуск ---
 
-    async def main():
+if __name__ == "__main__":
+    async def run_bot():
         await application.initialize()
         await application.bot.set_webhook(f"{WEBHOOK_URL}/webhook/{TELEGRAM_TOKEN}")
         await application.start()
-        Thread(target=lambda: flask_app.run(host="0.0.0.0", port=10000)).start()
 
-    asyncio.run(main())
+    def run_flask():
+        flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
+    Thread(target=run_flask).start()
+    asyncio.run(run_bot())
