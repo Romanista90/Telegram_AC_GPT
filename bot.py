@@ -1,71 +1,59 @@
-import logging
 import os
+import logging
+import openai
 from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    ContextTypes,
-    CommandHandler,
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+
+# Настройка логирования
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
 )
-from openai import OpenAI
 
-# Логирование
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Установка ключа OpenAI
+openai.api_key = os.getenv("TELEGRAM_GPT_OPENAI_API_KEY")
 
-# Ключи
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_GPT_TELEGRAM_TOKEN")
-OPENAI_API_KEY = os.environ.get("TELEGRAM_GPT_OPENAI_API_KEY")
-OPENAI_MODEL = "gpt-4o"  # Можно gpt-3.5-turbo, если хочешь дешевле
-
-openai = OpenAI(api_key=OPENAI_API_KEY)
-
-# Обработчик команды /start
+# Обработка команд
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Привет! Отправь мне описание задачи, и я сгенерирую критерии приёмки.")
+    await update.message.reply_text(
+        "Привет! Отправь мне описание задачи, и я сгенерирую критерии приёмки."
+    )
 
-# Обработка обычного текста
+# Обработка текста пользователя
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    prompt = update.message.text
-    await update.message.reply_text("Генерирую критерии приёмки...")
+    description = update.message.text
 
-    response = openai.chat.completions.create(
-        model=OPENAI_MODEL,
-        messages=[
-            {"role": "system", "content": "Ты опытный аналитик. На основе описания задачи генерируй критерии приёмки (acceptance criteria) в формате списка."},
-            {"role": "user", "content": prompt}
-        ]
-    )
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Ты помогаешь писать критерии приёмки на основе описания задачи. Формулируй их в виде маркированного списка. Действуй как опытный аналитик или продакт. Критериев должно быть не меньше трёх, максимум не ограничен, но пиши только полезные критерии, пиши вдумчиво."
+                },
+                {
+                    "role": "user",
+                    "content": description
+                }
+            ]
+        )
 
-    criteria = response.choices[0].message.content
-    await update.message.reply_text(criteria)
+        result = response.choices[0].message.content.strip()
+        await update.message.reply_text(result)
 
-# Запуск приложения с Webhook
-async def main():
-    app = (
-        ApplicationBuilder()
-        .token(TELEGRAM_TOKEN)
-        .read_timeout(10)
-        .write_timeout(10)
-        .get_updates_http_version("1.1")
-        .build()
-    )
+    except Exception as e:
+        logging.exception("Ошибка при обращении к OpenAI")
+        await update.message.reply_text(f"Произошла ошибка: {str(e)}")
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", start))  # alias
-    app.add_handler(CommandHandler("criteria", handle_message))  # опционально
-    app.add_handler(CommandHandler("acceptance", handle_message))  # опционально
+# Основной запуск
+if __name__ == '__main__':
+    TOKEN = os.getenv("TELEGRAM_GPT_TELEGRAM_TOKEN")
+    if not TOKEN:
+        raise ValueError("Не установлен TELEGRAM_GPT_TELEGRAM_TOKEN")
 
-    from telegram.ext import MessageHandler, filters
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application = ApplicationBuilder().token(TOKEN).build()
 
-    # Webhook
-    webhook_url = os.environ.get("WEBHOOK_URL")  # Добавим на Render
-    await app.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 10000)),
-        webhook_url=webhook_url
-    )
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    application.run_polling()
